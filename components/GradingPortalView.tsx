@@ -3,7 +3,12 @@
 
 import React, { memo } from 'react';
 import Link from 'next/link';
-import { useGradingPortal, StudentSubmission } from '../hooks/useGradingPortal';
+import { useGradingPortal, StudentSubmission } from '@/hooks/useGradingPortal';
+
+export interface GradingPortalViewProps {
+  state: ReturnType<typeof useGradingPortal>['state'];
+  actions: ReturnType<typeof useGradingPortal>['actions'];
+}
 
 interface LoginViewProps {
   teacherId: string;
@@ -303,9 +308,7 @@ const SubmissionCard = memo(function SubmissionCard({
   );
 });
 
-export default function Home() {
-  const { state, actions } = useGradingPortal();
-
+export default function GradingPortalView({ state, actions }: GradingPortalViewProps) {
   if (!state.isLoggedIn) {
     return (
       <LoginView

@@ -318,7 +318,7 @@ export default function GradebookView({ state, actions }: GradebookProps) {
         {/* Toolbar Controls Card */}
         <div style={{
           display: 'flex',
-          justify: 'space-between',
+          justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
           gap: '16px',

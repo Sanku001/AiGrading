@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useGradebook } from '@/hooks/useGradebook';
 
@@ -31,11 +32,45 @@ export default function GradebookView({ state, actions }: GradebookProps) {
     handleLogout,
     handleColumnHeaderChange,
     handleDeleteColumn,
+    handleMoveColumn,
+    handleReorderColumn, // Added drag-and-drop reorder handler
     handleCellChange,
     handleSaveChanges,
     handleAddStudent,
     handleAddColumn,
   } = actions;
+
+  // Drag and drop state
+  const [draggedColIndex, setDraggedColIndex] = useState<number | null>(null);
+  const [dragOverColIndex, setDragOverColIndex] = useState<number | null>(null);
+
+  const handleDragStart = (e: React.DragEvent<HTMLTableCellElement>, index: number) => {
+    e.dataTransfer.setData('text/plain', index.toString());
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedColIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLTableCellElement>, index: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverColIndex !== index) {
+      setDragOverColIndex(index);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLTableCellElement>, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedColIndex !== null && draggedColIndex !== targetIndex) {
+      handleReorderColumn(draggedColIndex, targetIndex);
+    }
+    setDraggedColIndex(null);
+    setDragOverColIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedColIndex(null);
+    setDragOverColIndex(null);
+  };
 
   if (!isLoggedIn) {
     return (
@@ -183,6 +218,32 @@ export default function GradebookView({ state, actions }: GradebookProps) {
         .action-btn:active {
           transform: translateY(0);
         }
+        .reorder-btn {
+          background: rgba(255, 255, 255, 0.15);
+          color: #FFFFFF;
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          border-radius: 4px;
+          cursor: pointer;
+          padding: 2px 5px;
+          font-size: 0.7rem;
+          line-height: 1;
+          transition: background 0.15s ease;
+        }
+        .reorder-btn:hover:not(:disabled) {
+          background: rgba(255, 255, 255, 0.3);
+        }
+        .reorder-btn:disabled {
+          opacity: 0.3;
+          cursor: not-allowed;
+        }
+        .drag-header {
+          cursor: grab;
+          user-select: none;
+          transition: background-color 0.15s ease, opacity 0.15s ease;
+        }
+        .drag-header:active {
+          cursor: grabbing;
+        }
       `}</style>
 
       {/* Header */}
@@ -193,7 +254,6 @@ export default function GradebookView({ state, actions }: GradebookProps) {
         boxShadow: '0 4px 20px rgba(30, 58, 138, 0.15)'
       }}>
         <div style={{ maxWidth: '1280px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-          
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{
               backgroundColor: '#F97316',
@@ -446,52 +506,99 @@ export default function GradebookView({ state, actions }: GradebookProps) {
                   }}>
                     Student ID
                   </th>
-                  {columns.map((col, index) => (
-                    <th key={index} style={{
-                      padding: '10px 12px',
-                      minWidth: '160px',
-                      borderRight: '1px solid rgba(255, 255, 255, 0.1)',
-                      backgroundColor: '#2563EB'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                        <input 
-                          type="text" 
-                          value={col} 
-                          onChange={(e) => handleColumnHeaderChange(index, e.target.value)} 
-                          style={{
-                            width: '80%',
-                            textAlign: 'center',
-                            fontWeight: '700',
-                            padding: '4px 6px',
-                            border: '1px solid #93C5FD',
-                            background: '#FFFFFF',
-                            color: '#1E3A8A',
-                            borderRadius: '4px',
-                            fontSize: '0.85rem',
-                            outline: 'none'
-                          }}
-                        />
-                        <button 
-                          type="button" 
-                          onClick={() => handleDeleteColumn(index)}
-                          title="Delete Assignment"
-                          style={{
-                            background: 'rgba(239, 68, 68, 0.2)',
-                            color: '#FFD1D1',
-                            border: '1px solid rgba(239, 68, 68, 0.4)',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            padding: '3px 6px',
-                            fontSize: '0.75rem',
-                            fontWeight: 'bold',
-                            lineHeight: 1
-                          }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </th>
-                  ))}
+                  {columns.map((col, index) => {
+                    const isDragging = draggedColIndex === index;
+                    const isDragOver = dragOverColIndex === index;
+
+                    return (
+                      <th 
+                        key={index} 
+                        draggable={true}
+                        onDragStart={(e) => handleDragStart(e, index)}
+                        onDragOver={(e) => handleDragOver(e, index)}
+                        onDrop={(e) => handleDrop(e, index)}
+                        onDragEnd={handleDragEnd}
+                        className="drag-header"
+                        title="Click and drag to reorder assignment column"
+                        style={{
+                          padding: '10px 12px',
+                          minWidth: '200px',
+                          borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+                          backgroundColor: isDragOver ? '#1D4ED8' : '#2563EB',
+                          opacity: isDragging ? 0.4 : 1,
+                          borderLeft: isDragOver ? '3px solid #F97316' : 'none'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                          <span style={{ fontSize: '0.75rem', opacity: 0.7, cursor: 'grab' }} title="Drag handle">⋮⋮</span>
+
+                          <button
+                            type="button"
+                            className="reorder-btn"
+                            disabled={index === 0}
+                            onClick={() => handleMoveColumn(index, 'left')}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            title="Move Left"
+                          >
+                            ◀
+                          </button>
+
+                          <input 
+                            type="text" 
+                            value={col} 
+                            draggable={false}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onChange={(e) => handleColumnHeaderChange(index, e.target.value)} 
+                            style={{
+                              width: '65%',
+                              textAlign: 'center',
+                              fontWeight: '700',
+                              padding: '4px 6px',
+                              border: '1px solid #93C5FD',
+                              background: '#FFFFFF',
+                              color: '#1E3A8A',
+                              borderRadius: '4px',
+                              fontSize: '0.85rem',
+                              outline: 'none',
+                              cursor: 'text'
+                            }}
+                          />
+
+                          <button
+                            type="button"
+                            className="reorder-btn"
+                            disabled={index === columns.length - 1}
+                            onClick={() => handleMoveColumn(index, 'right')}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            title="Move Right"
+                          >
+                            ▶
+                          </button>
+
+                          <button 
+                            type="button" 
+                            onClick={() => handleDeleteColumn(index)}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            title="Delete Assignment"
+                            style={{
+                              background: 'rgba(239, 68, 68, 0.2)',
+                              color: '#FFD1D1',
+                              border: '1px solid rgba(239, 68, 68, 0.4)',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              padding: '3px 6px',
+                              fontSize: '0.75rem',
+                              fontWeight: 'bold',
+                              lineHeight: 1,
+                              marginLeft: '2px'
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>

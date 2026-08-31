@@ -255,6 +255,30 @@ export function useGradebook() {
     setNewColName('');
   };
 
+  const handleMoveColumn = (index: number, direction: 'left' | 'right') => {
+   const targetIndex = direction === 'left' ? index - 1 : index + 1;
+
+    if (targetIndex < 0 || targetIndex >= columns.length) return;
+
+    setColumns((prevColumns) => {
+      const updated = [...prevColumns];
+      const [movedColumn] = updated.splice(index, 1);
+      updated.splice(targetIndex, 0, movedColumn);
+      return updated;
+    });
+  };
+
+  const handleReorderColumn = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+
+    setColumns((prevColumns) => {
+      const updated = [...prevColumns];
+      const [movedColumn] = updated.splice(fromIndex, 1);
+      updated.splice(toIndex, 0, movedColumn);
+      return updated;
+    });
+  };
+
   return {
     state: {
       teacherId,
@@ -284,6 +308,8 @@ export function useGradebook() {
       handleSaveChanges,
       handleAddStudent,
       handleAddColumn,
+      handleMoveColumn,
+      handleReorderColumn,
     },
   };
 }

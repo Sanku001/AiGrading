@@ -36,6 +36,7 @@ export interface StudentSubmission {
 
 const DB_NAME = 'GradePortalDB';
 const STORE_NAME = 'pendingSubmissions';
+const MAX_BASE64_SIZE_BYTES = 4 * 1024 * 1024; // 4MB threshold to avoid memory crashes
 
 const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -77,7 +78,7 @@ const getFilesFromDB = async (): Promise<Record<string, File[]>> => {
       const store = tx.objectStore(STORE_NAME);
       const request = store.openCursor();
       const filesMap: Record<string, File[]> = {};
-      
+
       request.onsuccess = (event: Event) => {
         const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
         if (cursor) {
@@ -95,11 +96,16 @@ const getFilesFromDB = async (): Promise<Record<string, File[]>> => {
   }
 };
 
-const readFileAsDataURL = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
+// Safe base64 converter with size guard to prevent heap memory allocation failure
+const safeReadFileAsDataURL = (file: File): Promise<string | null> => {
+  return new Promise((resolve) => {
+    if (file.size > MAX_BASE64_SIZE_BYTES) {
+      // Return null for large files so backend relies on Supabase file path/signed URL
+      return resolve(null);
+    }
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
+    reader.onerror = () => resolve(null);
     reader.readAsDataURL(file);
   });
 };
@@ -165,7 +171,7 @@ export function useGradingPortal() {
     gradeData
       ?.filter((g) => g.work_id === currentWorkId.trim())
       .forEach((g) => gradedSet.add(g.student_id));
-    
+
     setGradedStudentIds(Array.from(gradedSet));
 
     const savedFiles = await getFilesFromDB();
@@ -182,7 +188,6 @@ export function useGradingPortal() {
     });
   }, []);
 
-  // Restore persistent settings on mount
   useEffect(() => {
     const savedTeacherId = localStorage.getItem('teacher_id');
     if (savedTeacherId) {
@@ -202,7 +207,6 @@ export function useGradingPortal() {
     setIsMounted(true);
   }, [loadClassrooms]);
 
-  // Sync inputs to localStorage only after initial mount
   useEffect(() => {
     if (!isMounted) return;
     localStorage.setItem('work_id_input', workIdInput);
@@ -324,27 +328,49 @@ export function useGradingPortal() {
 
       try {
         const uploadedFilePaths: string[] = [];
+        const signedUrls: string[] = [];
 
         for (let fIdx = 0; fIdx < item.files.length; fIdx++) {
           const file = item.files[fIdx];
-          const filePath = `${selectedClassroom.id}/${workIdInput.trim()}/${item.studentId}_${Date.now()}_${fIdx}_${file.name}`;
-          
+          const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const filePath = `${selectedClassroom.id}/${workIdInput.trim()}/${item.studentId}_${Date.now()}_${fIdx}_${cleanFileName}`;
+
+          // Fallback Content-Type allows ZIP, MP4, PDF, CAD, or unknown binary types safely
+          const mimeType = file.type || 'application/octet-stream';
+
           const { error: uploadError } = await supabase.storage
             .from('student-submissions')
-            .upload(filePath, file, { upsert: true });
+            .upload(filePath, file, { 
+              upsert: true,
+              contentType: mimeType,
+              duplex: 'half'
+            });
 
           if (uploadError) throw new Error(`Supabase Storage upload failed for ${file.name}: ${uploadError.message}`);
+          
           uploadedFilePaths.push(filePath);
+
+          // Generate temporary signed URL so backend can access large files directly
+          const { data: signedData } = await supabase.storage
+            .from('student-submissions')
+            .createSignedUrl(filePath, 3600);
+
+          if (signedData?.signedUrl) {
+            signedUrls.push(signedData.signedUrl);
+          }
         }
 
-        const fileDataUrls = await Promise.all(item.files.map(readFileAsDataURL));
+        // Only convert files to Data URLs if under size limit (prevents memory allocation failures)
+        const fileDataUrls = await Promise.all(item.files.map(safeReadFileAsDataURL));
 
         const res = await fetch('/api/grade', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
-            fileDataUrls, 
-            fileDataUrl: fileDataUrls[0], 
+            fileDataUrls: fileDataUrls.filter(Boolean), 
+            fileDataUrl: fileDataUrls[0] || null, 
+            filePaths: uploadedFilePaths,
+            fileUrls: signedUrls,
             maxScore, 
             rules 
           })

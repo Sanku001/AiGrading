@@ -36,7 +36,7 @@ export interface StudentSubmission {
 
 const DB_NAME = 'GradePortalDB';
 const STORE_NAME = 'pendingSubmissions';
-const MAX_BASE64_SIZE_BYTES = 4 * 1024 * 1024; // 4MB threshold to avoid memory crashes
+const MAX_BASE64_SIZE_BYTES = 4 * 1024 * 1024; // 4MB threshold for inline base64
 
 const openDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
@@ -96,11 +96,9 @@ const getFilesFromDB = async (): Promise<Record<string, File[]>> => {
   }
 };
 
-// Safe base64 converter with size guard to prevent heap memory allocation failure
 const safeReadFileAsDataURL = (file: File): Promise<string | null> => {
   return new Promise((resolve) => {
     if (file.size > MAX_BASE64_SIZE_BYTES) {
-      // Return null for large files so backend relies on Supabase file path/signed URL
       return resolve(null);
     }
     const reader = new FileReader();
@@ -334,8 +332,6 @@ export function useGradingPortal() {
           const file = item.files[fIdx];
           const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
           const filePath = `${selectedClassroom.id}/${workIdInput.trim()}/${item.studentId}_${Date.now()}_${fIdx}_${cleanFileName}`;
-
-          // Fallback Content-Type allows ZIP, MP4, PDF, CAD, or unknown binary types safely
           const mimeType = file.type || 'application/octet-stream';
 
           const { error: uploadError } = await supabase.storage
@@ -350,7 +346,6 @@ export function useGradingPortal() {
           
           uploadedFilePaths.push(filePath);
 
-          // Generate temporary signed URL so backend can access large files directly
           const { data: signedData } = await supabase.storage
             .from('student-submissions')
             .createSignedUrl(filePath, 3600);
@@ -360,15 +355,22 @@ export function useGradingPortal() {
           }
         }
 
-        // Only convert files to Data URLs if under size limit (prevents memory allocation failures)
-        const fileDataUrls = await Promise.all(item.files.map(safeReadFileAsDataURL));
+        // Generate Base64 or fallback to Signed Storage URL for large files
+        const processedUrls = await Promise.all(
+          item.files.map(async (file, idx) => {
+            const dataUrl = await safeReadFileAsDataURL(file);
+            return dataUrl || signedUrls[idx] || '';
+          })
+        );
+
+        const primaryUrl = processedUrls[0] || signedUrls[0] || '';
 
         const res = await fetch('/api/grade', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ 
-            fileDataUrls: fileDataUrls.filter(Boolean), 
-            fileDataUrl: fileDataUrls[0] || null, 
+            fileDataUrls: processedUrls, 
+            fileDataUrl: primaryUrl, 
             filePaths: uploadedFilePaths,
             fileUrls: signedUrls,
             maxScore, 
